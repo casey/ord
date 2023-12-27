@@ -2,10 +2,11 @@
 
 set -euo pipefail
 
-if [ ! -z ${GITHUB_ACTIONS-} ]; then
+if [[ -n ${GITHUB_ACTIONS-} ]]; then
   set -x
 fi
 
+# Display help message
 help() {
   cat <<'EOF'
 Install a binary release of ord hosted on GitHub
@@ -20,35 +21,33 @@ FLAGS:
 OPTIONS:
     --tag TAG       Tag (version) of the crate to install, defaults to latest release
     --to LOCATION   Where to install the binary [default: ~/bin]
-    --target TARGET
+    --target TARGET Specify the installation target explicitly
 EOF
 }
 
-crate=ord
-url=https://github.com/ordinals/ord
-releases=$url/releases
-
-say() {
-  echo "install.sh: $*" >&2
+# Define required commands
+check_dependencies() {
+  local commands=("curl" "install" "mkdir" "mktemp" "tar" "cut")
+  for cmd in "${commands[@]}"; do
+    command -v "$cmd" > /dev/null 2>&1 || {
+      echo "Error: $cmd is required but not found." >&2
+      exit 1
+    }
+  done
 }
 
-err() {
-  if [ ! -z ${tempdir-} ]; then
-    rm -rf $tempdir
-  fi
+# Check and install dependencies
+check_dependencies
 
-  say "error: $*"
-  exit 1
-}
-
-need() {
-  if ! command -v $1 > /dev/null 2>&1; then
-    err "need $1 (command not found)"
-  fi
-}
-
+# Set default variables
+crate="ord"
+url="https://github.com/ordinals/ord"
+releases="$url/releases"
 force=false
-while test $# -gt 0; do
+dest="${HOME}/bin"
+
+# Parse command line options
+while [[ $# -gt 0 ]]; do
   case $1 in
     --force | -f)
       force=true
@@ -75,63 +74,55 @@ while test $# -gt 0; do
   shift
 done
 
-# Dependencies
-need curl
-need install
-need mkdir
-need mktemp
-need tar
-
-dest=${dest-"$HOME/bin"}
-
-if [ -z ${tag-} ]; then
-  need cut
-
-  tag=$(curl --proto =https --tlsv1.2 -sSf https://api.github.com/repos/ordinals/ord/releases/latest |
-    grep tag_name |
-    cut -d'"' -f4
-  )
+# Fetch the latest tag if not specified
+if [[ -z ${tag-} ]]; then
+  tag=$(curl --proto =https --tlsv1.2 -sSf "${releases}/latest" | grep -oP '"tag_name": "\K(.*)(?=")')
 fi
 
-if [ -z ${target-} ]; then
-  uname_target=`uname -m`-`uname -s`
+# Determine the target architecture
+if [[ -z ${target-} ]]; then
+  uname_target=$(uname -m)-$(uname -s)
 
   case $uname_target in
     arm64-Darwin) target=aarch64-apple-darwin;;
     x86_64-Darwin) target=x86_64-apple-darwin;;
     x86_64-Linux) target=x86_64-unknown-linux-gnu;;
     *)
-      say 'Could not determine target from output of `uname -m`-`uname -s`, please use `--target`:' $uname_target
-      say 'Target architecture is not supported by this install script.'
-      say 'Consider opening an issue or building from source: https://github.com/ordinals/ord'
+      echo "Error: Unsupported architecture $uname_target."
+      echo "Consider using --target flag to specify the target explicitly."
       exit 1
-    ;;
+      ;;
   esac
 fi
 
-archive="$releases/download/$tag/$crate-$tag-$target.tar.gz"
+archive="${releases}/download/${tag}/${crate}-${tag}-${target}.tar.gz"
 
-say "Repository:  $url"
-say "Crate:       $crate"
-say "Tag:         $tag"
-say "Target:      $target"
-say "Destination: $dest"
-say "Archive:     $archive"
+# Display installation details
+echo "Repository:  $url"
+echo "Crate:       $crate"
+echo "Tag:         $tag"
+echo "Target:      $target"
+echo "Destination: $dest"
+echo "Archive:     $archive"
 
-tempdir=`mktemp -d || mktemp -d -t tmp`
+# Create a temporary directory
+tempdir=$(mktemp -d || mktemp -d -t tmp)
 
-curl --proto =https --tlsv1.2 -sSfL $archive | tar --directory $tempdir --strip-components 1 -xz
+# Download and install the binary
+curl --proto =https --tlsv1.2 -sSfL "$archive" | tar --directory "$tempdir" --strip-components 1 -xz
 
-for name in `ls $tempdir`; do
-  file="$tempdir/$name"
-  test -x $file || continue
-
-  if [ -e "$dest/$name" ] && [ $force = false ]; then
-    err "$name already exists in $dest"
-  else
-    mkdir -p $dest
-    install -m 755 $file $dest
+# Install the binary
+for file in "$tempdir"/*; do
+  if [[ -x $file ]]; then
+    name=$(basename "$file")
+    if [[ -e "${dest}/${name}" && $force = false ]]; then
+      echo "Error: $name already exists in $dest."
+      exit 1
+    else
+      mkdir -p "$dest" && install -m 755 "$file" "$dest"
+    fi
   fi
 done
 
-rm -rf $tempdir
+# Clean up temporary directory
+rm -rf "$tempdir"
