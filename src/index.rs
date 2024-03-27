@@ -76,6 +76,7 @@ define_table! { OUTPOINT_TO_VALUE, &OutPointValue, u64}
 define_table! { RUNE_ID_TO_RUNE_ENTRY, RuneIdValue, RuneEntryValue }
 define_table! { RUNE_TO_RUNE_ID, u128, RuneIdValue }
 define_table! { SAT_TO_SATPOINT, u64, &SatPointValue }
+define_table! { SCRIPT_PUBKEY_PREFIX_TO_COUNT, &[u8], u64 }
 define_table! { SEQUENCE_NUMBER_TO_INSCRIPTION_ENTRY, u32, InscriptionEntryValue }
 define_table! { SEQUENCE_NUMBER_TO_RUNE_ID, u32, RuneIdValue }
 define_table! { SEQUENCE_NUMBER_TO_SATPOINT, u32, &SatPointValue }
@@ -228,6 +229,32 @@ impl Index {
     Index::open_with_event_sender(settings, None)
   }
 
+  pub fn prefixes(&self) -> Result<String> {
+    use std::fmt::Write;
+
+    let tx = self.database.begin_read()?;
+
+    let script_pubkey_prefix_to_count = tx.open_table(SCRIPT_PUBKEY_PREFIX_TO_COUNT)?;
+
+    let mut prefixes = Vec::new();
+
+    for item in script_pubkey_prefix_to_count.iter()? {
+      let (script, count) = item?;
+
+      prefixes.push((count.value(), ScriptBuf::from(script.value().to_owned())));
+    }
+
+    prefixes.sort_by_key(|(count, _script)| std::cmp::Reverse(*count));
+
+    let mut result = String::new();
+
+    for (count, script) in prefixes {
+      write!(&mut result, "{}\t{}\n", count, script)?;
+    }
+
+    Ok(result)
+  }
+
   pub fn open_with_event_sender(
     settings: &Settings,
     event_sender: Option<tokio::sync::mpsc::Sender<Event>>,
@@ -334,6 +361,7 @@ impl Index {
         tx.open_table(RUNE_ID_TO_RUNE_ENTRY)?;
         tx.open_table(RUNE_TO_RUNE_ID)?;
         tx.open_table(SAT_TO_SATPOINT)?;
+        tx.open_table(SCRIPT_PUBKEY_PREFIX_TO_COUNT)?;
         tx.open_table(SEQUENCE_NUMBER_TO_INSCRIPTION_ENTRY)?;
         tx.open_table(SEQUENCE_NUMBER_TO_RUNE_ID)?;
         tx.open_table(SEQUENCE_NUMBER_TO_SATPOINT)?;

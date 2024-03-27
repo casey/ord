@@ -256,6 +256,7 @@ impl Server {
         .route("/runes/balances", get(Self::runes_balances))
         .route("/sat/:sat", get(Self::sat))
         .route("/search", get(Self::search_by_query))
+        .route("/prefixes", get(Self::prefixes))
         .route("/search/*query", get(Self::search_by_path))
         .route("/static/*path", get(Self::static_asset))
         .route("/status", get(Self::status))
@@ -489,6 +490,10 @@ impl Server {
           .into_response(),
       )
     })
+  }
+
+  async fn prefixes(Extension(index): Extension<Arc<Index>>) -> ServerResult {
+    task::block_in_place(|| Ok(index.prefixes()?.into_response()))
   }
 
   async fn fallback(Extension(index): Extension<Arc<Index>>, uri: Uri) -> ServerResult<Response> {

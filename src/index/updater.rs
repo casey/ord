@@ -30,6 +30,84 @@ impl From<Block> for BlockData {
   }
 }
 
+fn prefix(script: &Script) -> Option<&Script> {
+  if !script.is_op_return() {
+    return None;
+  }
+
+  if script.len() <= 5 {
+    return Some(script);
+  }
+
+  let mut end = 0;
+
+  for instruction in script.instruction_indices() {
+    let (i, _instruction) = instruction.ok()?;
+
+    if i > 5 {
+      break;
+    }
+
+    end = i;
+  }
+
+  Some(&script[0..end])
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_prefix() {
+    let script = script::Builder::new()
+      .push_opcode(opcodes::all::OP_RETURN)
+      .into_script();
+
+    assert_eq!(prefix(&script), Some(script.as_script()));
+
+    let script = script::Builder::new()
+      .push_opcode(opcodes::all::OP_RETURN)
+      .push_opcode(opcodes::all::OP_PUSHNUM_13)
+      .into_script();
+
+    assert_eq!(prefix(&script), Some(script.as_script()));
+
+    let script = script::Builder::new()
+      .push_opcode(opcodes::all::OP_RETURN)
+      .push_opcode(opcodes::all::OP_PUSHNUM_13)
+      .push_opcode(opcodes::all::OP_PUSHNUM_13)
+      .push_opcode(opcodes::all::OP_PUSHNUM_13)
+      .push_opcode(opcodes::all::OP_PUSHNUM_13)
+      .into_script();
+
+    assert_eq!(prefix(&script), Some(script.as_script()));
+
+    assert_eq!(
+      prefix(
+        &script::Builder::new()
+          .push_opcode(opcodes::all::OP_RETURN)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .into_script()
+      ),
+      Some(
+        script::Builder::new()
+          .push_opcode(opcodes::all::OP_RETURN)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .push_opcode(opcodes::all::OP_PUSHNUM_13)
+          .into_script()
+          .as_script()
+      )
+    );
+  }
+}
+
 pub(crate) struct Updater<'index> {
   pub(super) height: u32,
   pub(super) index: &'index Index,
@@ -313,6 +391,25 @@ impl<'index> Updater<'index> {
     value_cache: &mut HashMap<OutPoint, u64>,
   ) -> Result<()> {
     Reorg::detect_reorg(&block, self.height, self.index)?;
+
+    {
+      let mut script_pubkey_prefix_to_count = wtx.open_table(SCRIPT_PUBKEY_PREFIX_TO_COUNT)?;
+
+      for (tx, _txid) in &block.txdata {
+        for output in &tx.output {
+          let Some(prefix) = prefix(&output.script_pubkey) else {
+            continue;
+          };
+
+          let count = script_pubkey_prefix_to_count
+            .get(prefix.as_bytes())?
+            .map(|guard| guard.value())
+            .unwrap_or_default();
+
+          script_pubkey_prefix_to_count.insert(prefix.as_bytes(), count + 1)?;
+        }
+      }
+    }
 
     let start = Instant::now();
     let mut sat_ranges_written = 0;
