@@ -306,6 +306,19 @@ impl Inscription {
       || self.metaprotocol.is_some()
       || matches!(self.media(), Media::Code(_) | Media::Text | Media::Unknown)
   }
+
+  pub fn unbind(&self) -> bool {
+    use regex::bytes::Regex;
+
+    lazy_static! {
+      static ref BRC_20: Regex = Regex::new(r"^(?s)\s*\{.*\}\s*$").unwrap();
+    }
+
+    self
+      .body()
+      .map(|body| BRC_20.is_match(body))
+      .unwrap_or_default()
+  }
 }
 
 #[cfg(test)]
@@ -906,5 +919,38 @@ mod tests {
       ..default()
     }
     .hidden());
+  }
+
+  #[test]
+  fn unbind() {
+    assert!(Inscription {
+      body: Some(b"{}".as_slice().into()),
+      ..default()
+    }
+    .unbind());
+
+    assert!(Inscription {
+      body: Some(b"{\n}".as_slice().into()),
+      ..default()
+    }
+    .unbind());
+
+    assert!(Inscription {
+      body: Some(b"{\"foo\":100}".as_slice().into()),
+      ..default()
+    }
+    .unbind());
+
+    assert!(Inscription {
+      body: Some(b" \t\n\r{} \t\n\r".as_slice().into()),
+      ..default()
+    }
+    .unbind());
+
+    assert!(!Inscription {
+      body: Some(b"foo{}bar".as_slice().into()),
+      ..default()
+    }
+    .unbind());
   }
 }

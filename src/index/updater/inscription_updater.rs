@@ -203,7 +203,8 @@ impl<'a, 'tx> InscriptionUpdater<'a, 'tx> {
             reinscription: inscribed_offsets.contains_key(&offset),
             unbound: input_value == 0
               || curse == Some(Curse::UnrecognizedEvenField)
-              || inscription.payload.unrecognized_even_field,
+              || inscription.payload.unrecognized_even_field
+              || inscription.payload.unbind(),
             vindicated: curse.is_some() && jubilant,
           },
         });
